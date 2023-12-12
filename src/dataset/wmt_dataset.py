@@ -6,6 +6,7 @@ from torch.utils.data import Dataset
 
 from src.utils.utils import clean_text
 
+from src.utils.utils import retrieve_map_languages_flores
 
 class Wmt(Dataset):
     """
@@ -48,9 +49,16 @@ class Wmt(Dataset):
         self.name = version
 
         try:
+            # self.translation_dataset = datasets.load_dataset(
+            #     version, source2target, split=split
+            # ).select(range(2))
+            # self.translation_dataset = datasets.load_dataset(
+            #     version, source2target, split=split
+            # ).select(range(100))
             self.translation_dataset = datasets.load_dataset(
                 version, source2target, split=split
             )
+            # breakpoint()
         except:
             raise ValueError(
                 f"{version} can read only the pairs cs-en, en-cs, de-en, en-de,"
@@ -59,6 +67,54 @@ class Wmt(Dataset):
 
         with torch.no_grad():
             self.tokenizer = hugginface_tokenizer
+
+
+        # breakpoint()
+        if 'llama' in self.tokenizer.name_or_path:
+            def modify_src(example):
+                
+                src_sent = example['translation'][self.src_lan]
+                example['translation'][self.src_lan] = f"""[INST] <<SYS>>
+You are a helpful, respectful and honest assistant. Always answer as helpfully as possible, while being safe.  Your answers should not include any harmful, unethical, racist, sexist, toxic, dangerous, or illegal content. Please ensure that your responses are socially unbiased and positive in nature.
+
+If a question does not make any sense, or is not factually coherent, explain why instead of answering something not correct. If you don't know the answer to a question, please don't share false information.
+<</SYS>>
+
+Translate this sentence from {retrieve_map_languages_flores(self.src_lan)} to {retrieve_map_languages_flores(self.tgt_lan)}:
+{src_sent}
+\n---\nTranslation:
+[/INST]"""
+                return example
+            self.translation_dataset = self.translation_dataset.map(modify_src)
+        
+        elif 'gpt' in self.tokenizer.name_or_path:
+            def modify_src(example):
+                
+                src_sent = example['translation'][self.src_lan]
+                example['translation'][self.src_lan] = f"""Translate this sentence from {retrieve_map_languages_flores(self.src_lan)} to {retrieve_map_languages_flores(self.tgt_lan)}:
+{src_sent}
+\n---\nTranslation: """
+                return example
+
+            self.translation_dataset = self.translation_dataset.map(modify_src)
+
+            
+#             for i in range(len(self.translation_dataset['translation'])):
+#                 src_sent = self.translation_dataset['translation'][i][self.src_lan]
+#                 src_sent = f"""[INST] <<SYS>>
+# You are a helpful, respectful and honest assistant. Always answer as helpfully as possible, while being safe.  Your answers should not include any harmful, unethical, racist, sexist, toxic, dangerous, or illegal content. Please ensure that your responses are socially unbiased and positive in nature.
+
+# If a question does not make any sense, or is not factually coherent, explain why instead of answering something not correct. If you don't know the answer to a question, please don't share false information.
+# <</SYS>>
+
+# Translate this sentence from {retrieve_map_languages_flores(self.src_lan)} to {retrieve_map_languages_flores(self.tgt_lan)}:
+# {src_sent}
+# \n---\nTranslation:
+# [/INST]  """
+#                 self.translation_dataset['translation'][i][self.src_lan] = src_sent
+
+            # breakpoint()
+                
 
     def collate_fn(self, batch):
 
