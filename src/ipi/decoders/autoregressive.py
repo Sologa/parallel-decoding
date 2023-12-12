@@ -10,6 +10,11 @@ class AutoregressiveDecoder(MTDecoder):
         self.name = "autoregressive"
         self.acronym = "a"
 
+        if 'llama' in self.tokenizer.name_or_path:
+            self.model.config.max_length = 2048
+        elif 'gpt' in self.tokenizer.name_or_path:
+            self.model.config.max_length = 1000
+
     @torch.no_grad()
     def decode(self, input_ids, attention_mask, init_tensor=None, logits_preprocessor=None, *args, **kwargs):
 
@@ -37,26 +42,82 @@ class AutoregressiveDecoder(MTDecoder):
             init_tensor = init_tensor[:, 0].unsqueeze(0)
 
         total_res = init_tensor.clone()
+        past_key_values = None
         while True:
-            if self.use_cache and index > 0:
-                if index == 1024:
-                    print(total_res)
-                output = self.model(
-                    None,
-                    attention_mask,
-                    decoder_input_ids=init_tensor,
-                    encoder_outputs=(encoder_last_hidden_state, None, None),
-                    use_cache=True,
-                    past_key_values=past_key_values,
-                )
+            if 'llama' in self.tokenizer.name_or_path:
+                # breakpoint()
+                if self.use_cache and index > 0:
+                    attention_mask = torch.cat((attention_mask, torch.ones((len(attention_mask), 1)).to(attention_mask)), dim=1)
+                    # breakpoint()
+                    output = self.model(
+                        input_ids=init_tensor,
+                        attention_mask=attention_mask,
+                        use_cache=True,
+                        past_key_values=past_key_values,
+                    )
+                else:
+                    # breakpoint()
+                    attention_mask = torch.cat((attention_mask, torch.ones((len(attention_mask), 1)).to(attention_mask)), dim=1)
+                    input_ids = torch.cat((input_ids, 29871 * torch.ones((len(input_ids), 1)).to(input_ids)), dim=1)
+                    # if index == 1024:
+                    #     print(total_res)
+                    # try:
+                    output = self.model(
+                        input_ids=input_ids,
+                        attention_mask=attention_mask,
+                        use_cache=True,
+                        past_key_values=past_key_values,
+                    )
+                    # except:
+                    #     breakpoint()
+            elif 'gpt' in self.tokenizer.name_or_path:
+                # breakpoint()
+                if self.use_cache and index > 0:
+                    attention_mask = torch.cat((attention_mask, torch.ones((len(attention_mask), 1)).to(attention_mask)), dim=1)
+                    # try:
+                    output = self.model(
+                        input_ids=init_tensor,
+                        attention_mask=attention_mask,
+                        use_cache=True,
+                        past_key_values=past_key_values,
+                    )
+                    # except:
+                    #     breakpoint()
+                else:
+                    attention_mask = torch.cat((attention_mask, torch.ones((len(attention_mask), 1)).to(attention_mask)), dim=1)
+                    input_ids = torch.cat((input_ids, 220 * torch.ones((len(input_ids), 1)).to(input_ids)), dim=1)
+                    # breakpoint()
+                    output = self.model(
+                        input_ids=input_ids,
+                        attention_mask=attention_mask,
+                        use_cache=True,
+                    )
+
+                # if (index + input_ids.shape[-1]) > self.model.config.max_length - 1:
+                #     breakpoint()
+                #     break
+
             else:
-                output = self.model(
-                    input_ids,
-                    attention_mask,
-                    decoder_input_ids=init_tensor,
-                    use_cache=True,
-                )
-            encoder_last_hidden_state = output.encoder_last_hidden_state
+                # breakpoint()
+                if self.use_cache and index > 0:
+                    if index == 1024:
+                        print(total_res)
+                    output = self.model(
+                        None,
+                        attention_mask,
+                        decoder_input_ids=init_tensor,
+                        encoder_outputs=(encoder_last_hidden_state, None, None),
+                        use_cache=True,
+                        past_key_values=past_key_values,
+                    )
+                else:
+                    output = self.model(
+                        input_ids,
+                        attention_mask,
+                        decoder_input_ids=init_tensor,
+                        use_cache=True,
+                    )
+                encoder_last_hidden_state = output.encoder_last_hidden_state
             past_key_values = output.past_key_values
             logits = output.logits
             if logits_preprocessor is not None:
@@ -66,11 +127,22 @@ class AutoregressiveDecoder(MTDecoder):
             max_value = torch.argmax(logits, dim=-1)
             last = max_value
             init_tensor = last.unsqueeze(0)
+            # breakpoint()
             total_res = torch.cat((total_res, init_tensor), dim=1)
 
             index += 1
-            if last[0].item() == self.eos_token_id or index == self.model.config.max_length - 1:
-                break
+
+            if 'llama' in self.tokenizer.name_or_path or 'gpt' in self.tokenizer.name_or_path:
+                if last[0].item() == self.eos_token_id or (index + input_ids.shape[-1]) > self.model.config.max_length - 1:
+                    break
+            else:
+                if last[0].item() == self.eos_token_id or index == self.model.config.max_length - 1:
+                    break
+
+        if 'gpt' in self.tokenizer.name_or_path:
+            total_res = total_res.long()
+
+        # breakpoint()
         return total_res, index
 
     def initialize(self):

@@ -11,6 +11,10 @@ class BeamSearchDecoder(MTDecoder):
         self.num_beams = num_beams
         self.early_stopping = early_stopping
 
+        self.model.generation_config.max_length = 1024
+
+        # breakpoint()
+
     def decode(self, input_ids, attention_mask, *args, **kwargs):
         if self.is_mbart:
             with self.tokenizer.as_target_tokenizer():
@@ -25,11 +29,26 @@ class BeamSearchDecoder(MTDecoder):
                 forced_bos_token_id=lang_id,
             )
         else:
+            # breakpoint()
+            # try:
+
+            # self.model.generation_config.max_length = 100
+
+            # beam_output = self.model.generate(
+            #     **{"input_ids": input_ids, "attention_mask": attention_mask, "generation_config": self.model.generation_config, "pad_token_id": self.tokenizer.pad_token_id},
+            #     num_beams=self.num_beams,
+            #     early_stopping=self.early_stopping,
+            # )
+
             beam_output = self.model.generate(
-                **{"input_ids": input_ids, "attention_mask": attention_mask},
+                **{"input_ids": input_ids, "attention_mask": attention_mask, "max_new_tokens": input_ids.shape[-1], "pad_token_id": self.tokenizer.pad_token_id},
                 num_beams=self.num_beams,
                 early_stopping=self.early_stopping,
             )
+
+            # except:
+            #     breakpoint()
+
 
         return beam_output, 0
 

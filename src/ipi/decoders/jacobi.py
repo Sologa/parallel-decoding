@@ -59,6 +59,7 @@ class JacobiDecoder(MTDecoder):
         *args,
         **kwargs
     ):
+        # breakpoint()
         max_length = target_len
         str_index = 0
         key_cache = 0
@@ -100,27 +101,53 @@ class JacobiDecoder(MTDecoder):
 
         output_probs = init_tensor.clone().float()
 
+        if 'llama' in self.tokenizer.name_or_path:
+            init_tensor[:] = 0
+            key_cache = input_ids.shape[1]
+            # init_tensor = torch.cat((input_ids, init_tensor), dim=1)
+            attention_mask = torch.cat((attention_mask, torch.ones_like(init_tensor)), dim=1)
         for index in range(str_index, max_length):
-            if self.use_cache and index > 0:
-                old_init_tensor = total_res.detach().clone()
-                init_tensor = total_res[:, index:]
-                output = self.model(
-                    input_ids,
-                    attention_mask,
-                    decoder_input_ids=init_tensor,
-                    encoder_outputs=(encoder_last_hidden_state, None, None),
-                    use_cache=True,
-                    past_key_values=self.limit_past_key_values(past_key_values, index + key_cache),
-                )
+            if 'llama' in self.tokenizer.name_or_path:
+                if self.use_cache and index > 0:
+                    # breakpoint()
+                    old_init_tensor = total_res.detach().clone()
+                    init_tensor = total_res[:, index:]
+                    output = self.model(
+                        init_tensor,
+                        attention_mask,
+                        use_cache=True,
+                        past_key_values=self.limit_past_key_values(past_key_values, index + key_cache),
+                    )
+                else:
+                    # breakpoint()
+                    old_init_tensor = init_tensor.detach().clone()
+                    output = self.model(
+                        torch.cat((input_ids, init_tensor), dim=1),
+                        attention_mask,
+                        use_cache=True,
+                    )
             else:
-                old_init_tensor = init_tensor.detach().clone()
-                output = self.model(
-                    input_ids,
-                    attention_mask,
-                    decoder_input_ids=init_tensor,
-                    use_cache=True,
-                )
-            encoder_last_hidden_state = output.encoder_last_hidden_state
+                if self.use_cache and index > 0:
+                    # breakpoint()
+                    old_init_tensor = total_res.detach().clone()
+                    init_tensor = total_res[:, index:]
+                    output = self.model(
+                        input_ids,
+                        attention_mask,
+                        decoder_input_ids=init_tensor,
+                        encoder_outputs=(encoder_last_hidden_state, None, None),
+                        use_cache=True,
+                        past_key_values=self.limit_past_key_values(past_key_values, index + key_cache),
+                    )
+                else:
+                    old_init_tensor = init_tensor.detach().clone()
+                    output = self.model(
+                        input_ids,
+                        attention_mask,
+                        decoder_input_ids=init_tensor,
+                        use_cache=True,
+                    )
+                encoder_last_hidden_state = output.encoder_last_hidden_state
             past_key_values = output.past_key_values
             logits = output.logits
             max_index = torch.argmax(logits, dim=-1)
@@ -135,10 +162,17 @@ class JacobiDecoder(MTDecoder):
                     (total_res[:, : index + 1], init_tensor[:, :-1]), dim=1
                 )
             else:
-                init_tensor[:, index + 1 :] = max_index[:, index:-1]
+                if 'llama' in self.tokenizer.name_or_path and max_index.shape[1] > init_tensor.shape[1]:
+                    init_tensor[:, index + 1 :] = max_index[:, (input_ids.shape[1] + index):-1]
+                else:
+                    init_tensor[:, index + 1 :] = max_index[:, index:-1]
                 total_res = init_tensor
+                # breakpoint()
 
-                output_probs[:, index + 1 :] = max_value[:, index:-1]
+                if 'llama' in self.tokenizer.name_or_path and max_value.shape[1] > output_probs.shape[1]:
+                    output_probs[:, index + 1 :] = max_value[:, (input_ids.shape[1] + index):-1]
+                else:
+                    output_probs[:, index + 1 :] = max_value[:, index:-1]
 
             stop_condition, return_tensor = self.stopping_criterion(
                 old_init_tensor, total_res

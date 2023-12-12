@@ -48,37 +48,72 @@ class GSJacobiDecoder(MTDecoder):
         iteration_saved = 0
         base_value = 0
 
+        # breakpoint()
+
+        if 'llama' in self.tokenizer.name_or_path:
+            init_tensor[:] = 0
+            key_cache += input_ids.shape[1]
+
         for blocco in blocks:
             max_len = blocco.shape[-1]
             blocco_usr = init_tensor[:, base_value : base_value + max_len]
 
+            if 'llama' in self.tokenizer.name_or_path:
+                # blocco_usr[:] = 0
+                attention_mask = torch.cat((attention_mask, torch.ones_like(blocco_usr)), dim=1)
+            
             for index in range(max_len):
                 old_blocco = blocco_usr.detach().clone()
                 blocco_usr_new = blocco_usr[:, index:]
-                if base_value == 0 and index == 0 and not self.is_mbart:
-                    output = self.model(
-                        input_ids,
-                        attention_mask,
-                        decoder_input_ids=blocco_usr_new,
-                        use_cache=True,
-                        past_key_values=total_past_key_values,
-                    )
-                    encoder_last_hidden_state = output.encoder_last_hidden_state
-                else:
-                    output = self.model(
-                        input_ids,
-                        attention_mask,
-                        decoder_input_ids=blocco_usr_new,
-                        encoder_outputs=(encoder_last_hidden_state, None, None),
-                        use_cache=True,
-                        past_key_values=total_past_key_values,
-                    )
 
+                if 'llama' in self.tokenizer.name_or_path:
+                    
+                    if base_value == 0 and index == 0:
+                        # breakpoint()
+                        output = self.model(
+                            torch.cat((input_ids, blocco_usr_new), dim=1),
+                            attention_mask,
+                            use_cache=True,
+                            past_key_values=total_past_key_values,
+                        )
+                    else:
+                        # breakpoint()
+                        output = self.model(
+                            blocco_usr_new,
+                            attention_mask,
+                            use_cache=True,
+                            past_key_values=total_past_key_values,
+                        )
+                else:
+                    if base_value == 0 and index == 0 and not self.is_mbart:
+                        output = self.model(
+                            input_ids,
+                            attention_mask,
+                            decoder_input_ids=blocco_usr_new,
+                            use_cache=True,
+                            past_key_values=total_past_key_values,
+                        )
+                        encoder_last_hidden_state = output.encoder_last_hidden_state
+                    else:
+                        output = self.model(
+                            input_ids,
+                            attention_mask,
+                            decoder_input_ids=blocco_usr_new,
+                            encoder_outputs=(encoder_last_hidden_state, None, None),
+                            use_cache=True,
+                            past_key_values=total_past_key_values,
+                        )
+
+                
                 total_past_key_values = self.limit_past_key_values(
                     output.past_key_values,
                     base_value + index + key_cache,
                 )
                 logits = output.logits
+
+                if 'llama' in self.tokenizer.name_or_path:
+                    logits = logits[:, -max_len:, :]
+
                 max_value = torch.argmax(logits, dim=-1)
 
                 if logits_preprocessor is not None:
@@ -98,6 +133,7 @@ class GSJacobiDecoder(MTDecoder):
                     ] = max_value[:, :]
                 else:
                     # If last block remove the last token after EOS
+                    # breakpoint()
                     init_tensor[
                         :, base_value + index + 1 : base_value + max_len + 1
                     ] = max_value[:, :-1]
@@ -105,10 +141,16 @@ class GSJacobiDecoder(MTDecoder):
                 stop_condition, _ = self.stopping_criterion(old_blocco, blocco_usr)
 
                 if stop_condition and index + 1 != max_len:
-                    total_past_key_values = self.limit_past_key_values(
-                        output.past_key_values,
-                        base_value + max_len + 1,
-                    )
+                    if 'llama' in self.tokenizer.name_or_path:
+                        total_past_key_values = self.limit_past_key_values(
+                            output.past_key_values,
+                            base_value + max_len + key_cache,
+                        )
+                    else:
+                        total_past_key_values = self.limit_past_key_values(
+                            output.past_key_values,
+                            base_value + max_len + 1,
+                        )
                     iteration_saved += max_len - index - 1
                     break
             base_value += max_len

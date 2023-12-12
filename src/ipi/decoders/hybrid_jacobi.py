@@ -20,6 +20,15 @@ class HybridJacobiDecoder(MTDecoder):
     def decode(
         self, input_ids, attention_mask, target_len, gold_target, init_tensor=None, logits_preprocessor=None, *args, **kwargs
     ):
+        # breakpoint()
+
+        if 'llama' in self.tokenizer.name_or_path:
+            init_tensor[:] = 0
+            init_tensor[:, 0] = 29871
+        elif 'gpt' in self.tokenizer.name_or_path:
+            init_tensor[:] = 50256
+            init_tensor[:, 0] = 220
+
         key_cache = 1
         if init_tensor is None:
             init_tensor = torch.tensor(
@@ -40,6 +49,25 @@ class HybridJacobiDecoder(MTDecoder):
             init_tensor = init_tensor[:, 1:]
             blocks = list(sliced(init_tensor.squeeze(0), self.gs_jaco_blocks))
             key_cache = 2
+        elif 'llama' in self.tokenizer.name_or_path or 'gpt' in self.tokenizer.name_or_path:
+            output = self.model(
+                input_ids=input_ids,
+                attention_mask=attention_mask,
+                use_cache=True,
+            )
+            total_past_key_values = output.past_key_values
+            key_cache += input_ids.shape[1]
+
+            # init_tensor = init_tensor[:, :300]
+            if 'gpt' in self.tokenizer.name_or_path:
+                init_tensor = init_tensor.long()
+                if (init_tensor.shape[-1] + input_ids.shape[-1]) > 1024:
+                    init_tensor = init_tensor[:, :1024-input_ids.shape[-1]]
+            else:
+                init_tensor = init_tensor
+                if (init_tensor.shape[-1] + input_ids.shape[-1]) > 2048:
+                    init_tensor = init_tensor[:, :2048-input_ids.shape[-1]]
+            blocks = list(sliced(init_tensor.squeeze(0), self.gs_jaco_blocks))
         else:
             init_tensor = init_tensor
             blocks = list(sliced(init_tensor.squeeze(0), self.gs_jaco_blocks))
@@ -48,48 +76,103 @@ class HybridJacobiDecoder(MTDecoder):
         iteration_saved = 0
         base_value = 0
 
-        for blocco in blocks:
+        # breakpoint()
+        ha = 0
+
+        count = 0
+
+        for i, blocco in enumerate(blocks):
             max_len = blocco.shape[-1]
             blocco_usr = init_tensor[:, base_value : base_value + max_len]
+
+            if 'llama' in self.tokenizer.name_or_path or 'gpt' in self.tokenizer.name_or_path:
+                # blocco_usr[:] = 0
+                attention_mask = torch.cat((attention_mask, torch.ones_like(blocco_usr)), dim=1)
+
             for index in range(max_len):
                 old_blocco = blocco_usr.detach().clone()
                 trig = self.trig_eos(
                     old_blocco, self.eos_token_id, init_tensor, base_value
                 )
+
                 if trig is not None:
-                    return trig, (gold_target.shape[-1] - 1) - iteration_saved
+                    # breakpoint()
+                    # return trig, (gold_target.shape[-1] - 1) - iteration_saved
+                    return trig, count
                 blocco_usr_new = blocco_usr[:, index:]
-                if base_value == 0 and index == 0 and not self.is_mbart:
+
+                if 'llama' in self.tokenizer.name_or_path or 'gpt' in self.tokenizer.name_or_path:
                     output = self.model(
-                        input_ids,
-                        attention_mask,
-                        decoder_input_ids=blocco_usr_new,
-                        use_cache=True,
-                        past_key_values=total_past_key_values,
-                    )
-                    encoder_last_hidden_state = output.encoder_last_hidden_state
+                            input_ids=blocco_usr_new,
+                            attention_mask=attention_mask,
+                            use_cache=True,
+                            past_key_values=total_past_key_values,
+                        )
+                    # if base_value == 0 and index == 0:
+                    #     # breakpoint()
+                    #     output = self.model(
+                    #         torch.cat((input_ids, blocco_usr_new), dim=1),
+                    #         attention_mask,
+                    #         use_cache=True,
+                    #         past_key_values=total_past_key_values,
+                    #     )
+                    # else:
+                    #     # breakpoint()
+                    #     # try:
+                    #     output = self.model(
+                    #         blocco_usr_new,
+                    #         attention_mask,
+                    #         use_cache=True,
+                    #         past_key_values=total_past_key_values,
+                    #     )
+                    #     # except:
+                    #     #     breakpoint()
+
                 else:
-                    output = self.model(
-                        input_ids,
-                        attention_mask,
-                        decoder_input_ids=blocco_usr_new,
-                        encoder_outputs=(encoder_last_hidden_state, None, None),
-                        use_cache=True,
-                        past_key_values=total_past_key_values,
-                    )
+                    if base_value == 0 and index == 0 and not self.is_mbart:
+                        output = self.model(
+                            input_ids,
+                            attention_mask,
+                            decoder_input_ids=blocco_usr_new,
+                            use_cache=True,
+                            past_key_values=total_past_key_values,
+                        )
+                        encoder_last_hidden_state = output.encoder_last_hidden_state
+                    else:
+                        output = self.model(
+                            input_ids,
+                            attention_mask,
+                            decoder_input_ids=blocco_usr_new,
+                            encoder_outputs=(encoder_last_hidden_state, None, None),
+                            use_cache=True,
+                            past_key_values=total_past_key_values,
+                        )
 
                 total_past_key_values = self.limit_past_key_values(
                     output.past_key_values,
                     base_value + index + key_cache,
                 )
 
+                ha = base_value + index + key_cache
+
                 logits = output.logits
+
+                # breakpoint()
+
+                # if 'llama' in self.tokenizer.name_or_path:
+                #     # logits = logits[:, -1:, :]
+                #     logits = logits[:, -max_len:, :]
+                #     logits = logits[:, index:, :]
+
                 max_value = torch.argmax(logits, dim=-1)
 
+                # breakpoint()
                 if logits_preprocessor is not None:
                     logits_new = logits_preprocessor(init_tensor[:, :base_value + index + 1], logits[:, 0, :])
                     max_value_new = torch.argmax(logits_new, dim=-1)
                     max_value[:,0] = max_value_new
+
+                # breakpoint()
 
                 if (
                     max_value.shape[-1]
@@ -97,6 +180,7 @@ class HybridJacobiDecoder(MTDecoder):
                         :, base_value + index + 1 : base_value + max_len + 1
                     ].shape[-1]
                 ):
+                    
                     init_tensor[
                         :, base_value + index + 1 : base_value + max_len + 1
                     ] = max_value[:, :]
@@ -112,39 +196,66 @@ class HybridJacobiDecoder(MTDecoder):
 
                 if stop_condition:
                     if eos_cond >= 0:
+                        # breakpoint()
                         return (
                             init_tensor[:, : base_value + eos_cond + 1],
-                            (gold_target.shape[-1] - 1) - iteration_saved,
+                            count,
+                            # (gold_target.shape[-1] - 1) - iteration_saved,
                         )
                     if index + 1 != max_len:
                         iteration_saved += max_len - index - 1
-                        total_past_key_values = self.limit_past_key_values(
-                            output.past_key_values,
-                            base_value + max_len + 1,
-                        )
+                        if 'llama' in self.tokenizer.name_or_path or 'gpt' in self.tokenizer.name_or_path:
+                            total_past_key_values = self.limit_past_key_values(
+                                output.past_key_values,
+                                base_value + max_len + key_cache,
+                            )
+                        else:
+                            total_past_key_values = self.limit_past_key_values(
+                                output.past_key_values,
+                                base_value + max_len + 1,
+                            )
                         break
+                    # breakpoint()
 
+                count += 1
             base_value += max_len
+
 
         total_res, total_iter = (
             init_tensor,
-            (gold_target.shape[-1] - 1) - iteration_saved,
+            count,
+            # iteration_saved,
+            # (gold_target.shape[-1] - 1) - iteration_saved,
         )
 
         init_tensor = init_tensor[:, -1].clone().unsqueeze(0)
 
-        #Go autoregressive until [EOS]
+
+        # Go autoregressive until [EOS]
         while True and base_value != self.model.config.max_length - 1:
             index = 0
-            output = self.model(
-                input_ids,
-                attention_mask,
-                decoder_input_ids=init_tensor,
-                encoder_outputs=(encoder_last_hidden_state, None, None),
-                use_cache=True,
-                past_key_values=total_past_key_values,
-            )
-            encoder_last_hidden_state = output.encoder_last_hidden_state
+            if 'llama' in self.tokenizer.name_or_path or 'gpt' in self.tokenizer.name_or_path:
+                if attention_mask.shape[-1] > self.model.config.max_length - 1:
+                    break
+
+                # breakpoint()
+                attention_mask = torch.cat((attention_mask, torch.ones((len(attention_mask), 1)).to(attention_mask)), dim=1)
+                output = self.model(
+                    input_ids=init_tensor,
+                    attention_mask=attention_mask,
+                    use_cache=True,
+                    past_key_values=total_past_key_values,
+                )
+            else:
+                output = self.model(
+                    input_ids,
+                    attention_mask,
+                    decoder_input_ids=init_tensor,
+                    encoder_outputs=(encoder_last_hidden_state, None, None),
+                    use_cache=True,
+                    past_key_values=total_past_key_values,
+                )
+                encoder_last_hidden_state = output.encoder_last_hidden_state
             total_past_key_values = output.past_key_values
             logits = output.logits
             max_value = torch.argmax(logits, dim=-1)
