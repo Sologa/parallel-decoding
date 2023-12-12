@@ -28,7 +28,7 @@ To produce the benchmark values for en-ro Wmt16, do:
 1. install all the requirements with `pip install -r requirements.txt`
 2. run the following to retrieve the benchmark values:
     ```
-    python3 main.py src_lang="en" tgt_lang="ro" device="cpu" dataset.name="wmt" dataset.version="16" task="benchmark" bench.result_dir="[your path]" model.model_name="Helsinki-NLP/opus-mt-en-ro"
+    python3 main.py src_lang="en" tgt_lang="ro" device="cuda" dataset.name="wmt" dataset.version="16" task="benchmark" bench.result_dir="[your path]" model.model_name="Helsinki-NLP/opus-mt-en-ro"
     ```
 Iters speedup and BLEU results should be easy to reproduce. Time speedups depend on the availability of the underlying hardware and software to run computation in parallel without introducing overheads. Please follow the experimental setting proposed in the paper. The easiest way is to use a virgin virtual machine, we provide the instructions in the Scaling Experiments in this readme.
 
