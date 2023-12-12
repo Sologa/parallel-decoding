@@ -20,27 +20,50 @@ def check_zero_division(a, b):
     return "na" if b == 0 else round(a / b, 3)
 
 def get_logits_preprocessor(model, input_ids, eos_token_id):
+    # breakpoint()
+    model.generation_config.repetition_penalty = None 
+    model.generation_config.encoder_no_repeat_ngram_size = None 
+    model.generation_config.bad_words_ids = None 
+    model.generation_config.min_length = 0 
+    model.generation_config.max_length = model.config.max_length 
+    model.generation_config.eos_token_id = eos_token_id 
+    model.generation_config.forced_bos_token_id = None 
+    model.generation_config.forced_eos_token_id = None 
+    model.generation_config.num_beams = 1 
+    model.generation_config.num_beam_groups = 1 
+    model.generation_config.diversity_penalty = None 
+    model.generation_config.remove_invalid_values = None 
+    model.generation_config.exponential_decay_length_penalty = None 
+    model.generation_config.renormalize_logits = None 
     logits_preprocessor = model._get_logits_processor(
-        repetition_penalty=None,
-        no_repeat_ngram_size=None,
-        encoder_no_repeat_ngram_size=None,
+        generation_config=model.generation_config,
         input_ids_seq_length=1,
         encoder_input_ids=input_ids,
-        bad_words_ids=None,
-        min_length=0,
-        max_length=model.config.max_length,
-        eos_token_id=eos_token_id,
-        forced_bos_token_id=None,
-        forced_eos_token_id=None,
         prefix_allowed_tokens_fn=None,
-        num_beams=1,
-        num_beam_groups=1,
-        diversity_penalty=None,
-        remove_invalid_values=None,
-        exponential_decay_length_penalty=None,
         logits_processor=[],
-        renormalize_logits=None
     )
+
+    # logits_preprocessor = model._get_logits_processor(
+    #     repetition_penalty=None,
+    #     no_repeat_ngram_size=None,
+    #     encoder_no_repeat_ngram_size=None,
+    #     input_ids_seq_length=1,
+    #     encoder_input_ids=input_ids,
+    #     bad_words_ids=None,
+    #     min_length=0,
+    #     max_length=model.config.max_length,
+    #     eos_token_id=eos_token_id,
+    #     forced_bos_token_id=None,
+    #     forced_eos_token_id=None,
+    #     prefix_allowed_tokens_fn=None,
+    #     num_beams=1,
+    #     num_beam_groups=1,
+    #     diversity_penalty=None,
+    #     remove_invalid_values=None,
+    #     exponential_decay_length_penalty=None,
+    #     logits_processor=[],
+    #     renormalize_logits=None
+    # )
     return logits_preprocessor
 
 
